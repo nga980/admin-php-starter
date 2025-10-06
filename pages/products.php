@@ -1,10 +1,34 @@
 <?php
-$demo = [
-  ['img' => 'https://via.placeholder.com/60', 'sku'=>'TSHIRT-BASIC-BLK-S', 'name'=>'Áo thun basic đen', 'cat'=>'Áo thun', 'variants'=>'S/M/L', 'price'=>159000, 'sale'=>129000, 'stock'=>12, 'status'=>1, 'updated'=>'2025-09-14'],
-  ['img' => 'https://via.placeholder.com/60', 'sku'=>'DRESS-FLORAL-RED-M', 'name'=>'Đầm hoa đỏ', 'cat'=>'Đầm', 'variants'=>'S/M', 'price'=>399000, 'sale'=>0, 'stock'=>2, 'status'=>1, 'updated'=>'2025-09-12'],
-  ['img' => 'https://via.placeholder.com/60', 'sku'=>'JEANS-SKINNY-BLU-26', 'name'=>'Quần jeans skinny', 'cat'=>'Quần', 'variants'=>'26/27/28', 'price'=>489000, 'sale'=>459000, 'stock'=>0, 'status'=>0, 'updated'=>'2025-09-11']
-];
+// Simple product listing page without status column. Displays purchase and selling prices.
+
+// Handle product deletion if 'delete' parameter exists
+if (isset($_GET['delete']) && $_GET['delete']) {
+    $idToDelete = $_GET['delete'];
+    delete_product($idToDelete);
+
+    // Giữ tham số q & p khi quay lại
+    $params = ['page' => 'products'];
+    if (isset($_GET['q']) && $_GET['q'] !== '') $params['q'] = $_GET['q'];
+    if (isset($_GET['p']) && (int)$_GET['p'] > 0) $params['p'] = (int)$_GET['p'];
+
+    header('Location: index.php?' . http_build_query($params));
+    exit;
+}
+
+// Lấy tham số tìm kiếm & trang hiện tại
+$query = isset($_GET['q']) ? trim($_GET['q']) : '';
+$page  = isset($_GET['p']) ? max(1, (int)$_GET['p']) : 1;
+$perPage = 15;
+$offset  = ($page - 1) * $perPage;
+
+// Tổng số bản ghi (để tính tổng trang)
+$total = get_total_products($query);
+$totalPages = max(1, (int)ceil($total / $perPage));
+
+// Lấy dữ liệu trang hiện tại (đã filter theo query)
+$products = get_products_paginated($perPage, $offset, $query);
 ?>
+
 <div class="d-flex align-items-center justify-content-between mb-3">
   <h4 class="mb-0">Sản phẩm</h4>
   <div>
@@ -12,66 +36,127 @@ $demo = [
   </div>
 </div>
 
-<div class="card mb-3">
-  <div class="card-body">
-    <form class="form-row">
-      <div class="col-md-3 mb-2">
-        <input class="form-control" placeholder="Tên / SKU"/>
-      </div>
-      <div class="col-md-2 mb-2">
-        <select class="custom-select"><option>Danh mục</option><option>Áo thun</option><option>Đầm</option></select>
-      </div>
-      <div class="col-md-2 mb-2">
-        <select class="custom-select"><option>Trạng thái</option><option value="1">Hiển thị</option><option value="0">Ẩn</option></select>
-      </div>
-      <div class="col-md-2 mb-2">
-        <select class="custom-select"><option>Tồn kho</option><option>Còn hàng</option><option>Hết hàng</option></select>
-      </div>
-      <div class="col-md-3 mb-2 text-right">
-        <button class="btn btn-outline-secondary">Reset</button>
-        <button class="btn btn-primary ml-2">Lọc</button>
-      </div>
-    </form>
+<!-- Simple search form -->
+<form method="get" class="mb-3">
+  <input type="hidden" name="page" value="products" />
+  <div class="input-group" style="max-width: 300px;">
+    <input type="text" name="q" class="form-control" placeholder="Tìm theo tên hoặc mã" value="<?php echo h($query); ?>" />
+    <div class="input-group-append">
+      <button type="submit" class="btn btn-outline-secondary">Tìm</button>
+    </div>
   </div>
-</div>
+</form>
 
 <div class="card">
-  <div class="table-responsive">
+  <div class="table-responsive p-3">
     <table class="table table-hover mb-0">
       <thead class="thead-light">
         <tr>
-          <th>Ảnh</th><th>SKU</th><th>Tên</th><th>Danh mục</th><th>Biến thể</th><th>Giá</th><th>Giá sale</th><th>Tồn</th><th>Trạng thái</th><th>Ngày cập nhật</th><th></th>
+          <th>Ảnh</th>
+          <th>Mã</th>
+          <th>Tên</th>
+          <th>Danh mục</th>
+          <th>Biến thể</th>
+          <th>Giá nhập</th>
+          <th>Giá bán</th>
+          <th>Tồn kho</th>
+          <th>Ngày cập nhật</th>
+          <th class="text-right">Thao tác</th>
         </tr>
       </thead>
       <tbody>
-      <?php foreach ($demo as $row): ?>
+        <?php if (empty($products)): ?>
+          <tr><td colspan="10" class="text-center text-muted">Không có sản phẩm.</td></tr>
+        <?php else: ?>
+        <?php foreach ($products as $row): ?>
         <tr>
-          <td><img src="<?php echo h($row['img']); ?>" width="48" height="48" class="rounded"></td>
-          <td><?php echo h($row['sku']); ?></td>
+          <td>
+            <?php
+              $imgPath = $row['image'];
+              $displayPlaceholder = true;
+              if (!empty($imgPath)) {
+                  if (strpos($imgPath, 'uploads/') === 0) {
+                      $fullImgPath = __DIR__ . '/../' . $imgPath;
+                      if (file_exists($fullImgPath)) {
+                          $displayPlaceholder = false;
+                      }
+                  } else {
+                      $displayPlaceholder = false;
+                  }
+              }
+            ?>
+            <?php if (!$displayPlaceholder): ?>
+              <img src="<?php echo h($row['image']); ?>" width="48" height="48" class="rounded" />
+            <?php else: ?>
+              <img src="https://via.placeholder.com/60" width="48" height="48" class="rounded" />
+            <?php endif; ?>
+          </td>
+          <td><?php echo h($row['id']); ?></td>
           <td><?php echo h($row['name']); ?></td>
-          <td><?php echo h($row['cat']); ?></td>
-          <td><?php echo h($row['variants']); ?></td>
+          <td><?php echo h($row['category']); ?></td>
+          <td><?php echo h($row['variants'] ?? 0); ?></td>
+          <td><?php echo money($row['purchase']); ?></td>
           <td><?php echo money($row['price']); ?></td>
-          <td><?php echo $row['sale'] ? money($row['sale']) : '-'; ?></td>
-          <td><?php echo (int)$row['stock']; ?></td>
-          <td><?php echo $row['status'] ? '<span class="badge badge-success">Hiển thị</span>' : '<span class="badge badge-secondary">Ẩn</span>'; ?></td>
-          <td><?php echo h($row['updated']); ?></td>
+          <td><?php echo (int)($row['stock'] ?? 0); ?></td>
+          <td><?php echo h(date('Y-m-d', strtotime($row['updated_at']))); ?></td>
           <td class="text-right">
-            <a href="index.php?page=product_form&sku=<?php echo urlencode($row['sku']); ?>" class="btn btn-sm btn-outline-primary">Sửa</a>
-            <button class="btn btn-sm btn-outline-danger">Xoá</button>
+            <a href="index.php?page=product_form&id=<?php echo urlencode($row['id']); ?>" class="btn btn-sm btn-outline-primary">Sửa</a>
+            <a href="index.php?page=products&delete=<?php echo urlencode($row['id']); ?>&q=<?php echo urlencode($query); ?>&p=<?php echo $page; ?>" class="btn btn-sm btn-outline-danger" onclick="return confirm('Bạn có chắc chắn muốn xoá sản phẩm này?');">Xoá</a>
           </td>
         </tr>
-      <?php endforeach; ?>
+        <?php endforeach; ?>
+        <?php endif; ?>
       </tbody>
     </table>
   </div>
-  <div class="card-footer d-flex justify-content-between">
-    <div>Hiển thị 1–3 / 3</div>
-    <nav>
-      <ul class="pagination pagination-sm mb-0">
-        <li class="page-item active"><span class="page-link">1</span></li>
-        <li class="page-item disabled"><span class="page-link">2</span></li>
-      </ul>
-    </nav>
-  </div>
 </div>
+
+<?php
+// helper tạo URL giữ tham số q & page=products
+function build_page_url($p) {
+    $params = ['page' => 'products'];
+    if (isset($_GET['q']) && $_GET['q'] !== '') $params['q'] = $_GET['q'];
+    $params['p'] = $p;
+    return 'index.php?' . http_build_query($params);
+}
+
+// Tính range hiển thị (cửa sổ 5 trang)
+$start = max(1, $page - 2);
+$end   = min($totalPages, $page + 2);
+if ($end - $start < 4) {
+    if ($start == 1) $end = min($totalPages, $start + 4);
+    else $start = max(1, $end - 4);
+}
+?>
+
+<nav aria-label="Pagination" class="mt-3">
+  <ul class="pagination mb-0">
+    <li class="page-item <?php echo $page <= 1 ? 'disabled' : '' ?>">
+      <a class="page-link" href="<?php echo $page > 1 ? h(build_page_url($page - 1)) : '#' ?>" tabindex="-1">«</a>
+    </li>
+
+    <?php if ($start > 1): ?>
+      <li class="page-item"><a class="page-link" href="<?php echo h(build_page_url(1)); ?>">1</a></li>
+      <?php if ($start > 2): ?>
+        <li class="page-item disabled"><span class="page-link">…</span></li>
+      <?php endif; ?>
+    <?php endif; ?>
+
+    <?php for ($i = $start; $i <= $end; $i++): ?>
+      <li class="page-item <?php echo $i === $page ? 'active' : '' ?>">
+        <a class="page-link" href="<?php echo h(build_page_url($i)); ?>"><?php echo $i; ?></a>
+      </li>
+    <?php endfor; ?>
+
+    <?php if ($end < $totalPages): ?>
+      <?php if ($end < $totalPages - 1): ?>
+        <li class="page-item disabled"><span class="page-link">…</span></li>
+      <?php endif; ?>
+      <li class="page-item"><a class="page-link" href="<?php echo h(build_page_url($totalPages)); ?>"><?php echo $totalPages; ?></a></li>
+    <?php endif; ?>
+
+    <li class="page-item <?php echo $page >= $totalPages ? 'disabled' : '' ?>">
+      <a class="page-link" href="<?php echo $page < $totalPages ? h(build_page_url($page + 1)) : '#' ?>">»</a>
+    </li>
+  </ul>
+</nav>

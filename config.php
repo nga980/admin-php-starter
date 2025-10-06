@@ -11,7 +11,7 @@ $BASE_URL = rtrim(
 
 // Database config (placeholder) — dùng array() thay cho [] để tương thích PHP cũ
 $DB = array(
-  'dsn'  => 'mysql:host=localhost;dbname=fashion_db;charset=utf8mb4',
+  'dsn'  => 'mysql:host=localhost;dbname=suny_store_product_db;charset=utf8mb4',
   'user' => 'root',
   'pass' => ''
 );
