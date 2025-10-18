@@ -374,3 +374,136 @@ function delete_product($id) {
     $stmtDelProd = $pdo->prepare('DELETE FROM san_pham WHERE ma_san_pham = ?');
     return $stmtDelProd->execute(array($id));
 }
+
+
+/**
+ * ====== FILTER HELPERS FOR PRODUCT LIST ======
+ */
+
+function dm_get_categories() {
+    $pdo = get_pdo();
+    if (!$pdo) return [];
+    $sql = "SELECT ma_danh_muc, ten_danh_muc FROM danh_muc ORDER BY ten_danh_muc ASC";
+    return $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
+}
+
+function dm_get_sizes() {
+    $pdo = get_pdo();
+    if (!$pdo) return [];
+    $sql = "SELECT DISTINCT kich_thuoc FROM chi_tiet_san_pham WHERE kich_thuoc IS NOT NULL AND kich_thuoc <> '' ORDER BY kich_thuoc";
+    $rows = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
+    return array_values(array_filter(array_map(function($r){ return $r['kich_thuoc']; }, $rows)));
+}
+
+function dm_get_colors() {
+    $pdo = get_pdo();
+    if (!$pdo) return [];
+    $sql = "SELECT DISTINCT mau_sac FROM chi_tiet_san_pham WHERE mau_sac IS NOT NULL AND mau_sac <> '' ORDER BY mau_sac";
+    $rows = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
+    return array_values(array_filter(array_map(function($r){ return $r['mau_sac']; }, $rows)));
+}
+
+function dm_count_products_filtered($q = '', $category = null, $size = '', $color = '') {
+    $pdo = get_pdo();
+    if (!$pdo) return 0;
+
+    $where = [];
+    $params = [];
+
+    if ($q !== '') {
+        $where[] = "(sp.ma_san_pham LIKE :kw OR sp.ten_san_pham LIKE :kw)";
+        $params[':kw'] = '%' . $q . '%';
+    }
+    if (!empty($category)) {
+        $where[] = "sp.ma_danh_muc = :cat";
+        $params[':cat'] = (int)$category;
+    }
+    if ($size !== '') {
+        $where[] = "EXISTS (SELECT 1 FROM chi_tiet_san_pham ct WHERE ct.ma_san_pham = sp.ma_san_pham AND ct.kich_thuoc = :size)";
+        $params[':size'] = $size;
+    }
+    if ($color !== '') {
+        $where[] = "EXISTS (SELECT 1 FROM chi_tiet_san_pham ct2 WHERE ct2.ma_san_pham = sp.ma_san_pham AND ct2.mau_sac = :color)";
+        $params[':color'] = $color;
+    }
+
+    $sql = "SELECT COUNT(*) AS total
+            FROM san_pham sp
+            " . (count($where) ? " WHERE " . implode(" AND ", $where) : "");
+
+    $stmt = $pdo->prepare($sql);
+    foreach ($params as $k=>$v) {
+        if ($k === ':cat') $stmt->bindValue($k, (int)$v, PDO::PARAM_INT);
+        else $stmt->bindValue($k, $v, PDO::PARAM_STR);
+    }
+    $stmt->execute();
+    return (int)$stmt->fetchColumn();
+}
+
+function dm_get_products_filtered($limit, $offset, $q = '', $category = null, $size = '', $color = '') {
+    $pdo = get_pdo();
+    if (!$pdo) return [];
+
+    $where = [];
+    $params = [
+        ':limit' => (int)$limit,
+        ':offset' => (int)$offset,
+    ];
+
+    if ($q !== '') {
+        $where[] = "(sp.ma_san_pham LIKE :kw OR sp.ten_san_pham LIKE :kw)";
+        $params[':kw'] = '%' . $q . '%';
+    }
+    if (!empty($category)) {
+        $where[] = "sp.ma_danh_muc = :cat";
+        $params[':cat'] = (int)$category;
+    }
+    if ($size !== '') {
+        $where[] = "EXISTS (SELECT 1 FROM chi_tiet_san_pham ct WHERE ct.ma_san_pham = sp.ma_san_pham AND ct.kich_thuoc = :size)";
+        $params[':size'] = $size;
+    }
+    if ($color !== '') {
+        $where[] = "EXISTS (SELECT 1 FROM chi_tiet_san_pham ct2 WHERE ct2.ma_san_pham = sp.ma_san_pham AND ct2.mau_sac = :color)";
+        $params[':color'] = $color;
+    }
+
+    $sql = "
+        SELECT
+            sp.ma_san_pham AS id,
+            sp.ten_san_pham AS name,
+            sp.mo_ta AS description,
+            sp.gia_nhap AS purchase,
+            sp.gia_ban AS price,
+            COALESCE(SUM(ct.so_luong), 0) AS stock,
+            dm.ten_danh_muc AS category,
+            (
+                SELECT anh.dia_chi_anh
+                FROM anh_san_pham anh
+                WHERE anh.ma_san_pham = sp.ma_san_pham AND anh.anh_chinh = 1
+                ORDER BY anh.ma_anh ASC
+                LIMIT 1
+            ) AS image,
+            sp.ngay_cap_nhat AS updated_at,
+            COUNT(DISTINCT CONCAT(IFNULL(ct.kich_thuoc,''), '-', IFNULL(ct.mau_sac,''))) AS variants
+        FROM san_pham sp
+        LEFT JOIN danh_muc dm ON dm.ma_danh_muc = sp.ma_danh_muc
+        LEFT JOIN chi_tiet_san_pham ct ON ct.ma_san_pham = sp.ma_san_pham
+        " . (count($where) ? " WHERE " . implode(" AND ", $where) : "") . "
+        GROUP BY sp.ma_san_pham
+        ORDER BY sp.ngay_cap_nhat DESC
+        LIMIT :limit OFFSET :offset
+    ";
+
+    $stmt = $pdo->prepare($sql);
+    foreach ($params as $k=>$v) {
+        if ($k === ':limit' || $k === ':offset') {
+            $stmt->bindValue($k, (int)$v, PDO::PARAM_INT);
+        } elseif ($k === ':cat') {
+            $stmt->bindValue($k, (int)$v, PDO::PARAM_INT);
+        } else {
+            $stmt->bindValue($k, $v, PDO::PARAM_STR);
+        }
+    }
+    $stmt->execute();
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
